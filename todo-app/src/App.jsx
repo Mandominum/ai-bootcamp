@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import './App.css'
+import { supabase } from './lib/supabase'
 
 function App() {
   const [todos, setTodos] = useState([])
@@ -9,50 +10,119 @@ function App() {
   const [editingId, setEditingId] = useState(null)
   const [editingText, setEditingText] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
+  const [loading, setLoading] = useState(true)
 
-  // Load todos from localStorage on mount
+  // Fetch todos from Supabase on mount
   useEffect(() => {
-    const savedTodos = localStorage.getItem('todos')
-    if (savedTodos) {
-      setTodos(JSON.parse(savedTodos))
-    }
+    fetchTodos()
   }, [])
 
-  // Save todos to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('todos', JSON.stringify(todos))
-  }, [todos])
+  const fetchTodos = async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('todos')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      // Convert snake_case from database to camelCase for app
+      const formattedTodos = data.map(todo => ({
+        id: todo.id,
+        text: todo.text,
+        completed: todo.completed,
+        category: todo.category,
+        dueDate: todo.due_date,
+        createdAt: todo.created_at
+      }))
+
+      setTodos(formattedTodos)
+    } catch (error) {
+      console.error('Error fetching todos:', error.message)
+      alert('Error loading todos. Please refresh the page.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Add new todo
-  const addTodo = (e) => {
+  const addTodo = async (e) => {
     e.preventDefault()
     if (inputValue.trim() === '') return
 
-    const newTodo = {
-      id: Date.now(),
-      text: inputValue,
-      completed: false,
-      category: category || 'General',
-      dueDate: dueDate || null,
-      createdAt: new Date().toISOString()
-    }
+    try {
+      const { data, error } = await supabase
+        .from('todos')
+        .insert([
+          {
+            text: inputValue,
+            completed: false,
+            category: category || 'General',
+            due_date: dueDate || null
+          }
+        ])
+        .select()
 
-    setTodos([...todos, newTodo])
-    setInputValue('')
-    setCategory('')
-    setDueDate('')
+      if (error) throw error
+
+      // Add the new todo to state
+      const newTodo = {
+        id: data[0].id,
+        text: data[0].text,
+        completed: data[0].completed,
+        category: data[0].category,
+        dueDate: data[0].due_date,
+        createdAt: data[0].created_at
+      }
+
+      setTodos([newTodo, ...todos])
+      setInputValue('')
+      setCategory('')
+      setDueDate('')
+    } catch (error) {
+      console.error('Error adding todo:', error.message)
+      alert('Error adding todo. Please try again.')
+    }
   }
 
   // Delete todo
-  const deleteTodo = (id) => {
-    setTodos(todos.filter(todo => todo.id !== id))
+  const deleteTodo = async (id) => {
+    try {
+      const { error } = await supabase
+        .from('todos')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      setTodos(todos.filter(todo => todo.id !== id))
+    } catch (error) {
+      console.error('Error deleting todo:', error.message)
+      alert('Error deleting todo. Please try again.')
+    }
   }
 
   // Toggle todo completion
-  const toggleTodo = (id) => {
-    setTodos(todos.map(todo =>
-      todo.id === id ? { ...todo, completed: !todo.completed } : todo
-    ))
+  const toggleTodo = async (id) => {
+    const todo = todos.find(t => t.id === id)
+    if (!todo) return
+
+    try {
+      const { error } = await supabase
+        .from('todos')
+        .update({ completed: !todo.completed })
+        .eq('id', id)
+
+      if (error) throw error
+
+      setTodos(todos.map(t =>
+        t.id === id ? { ...t, completed: !t.completed } : t
+      ))
+    } catch (error) {
+      console.error('Error updating todo:', error.message)
+      alert('Error updating todo. Please try again.')
+    }
   }
 
   // Start editing a todo
@@ -62,14 +132,26 @@ function App() {
   }
 
   // Save edited todo
-  const saveEdit = (id) => {
+  const saveEdit = async (id) => {
     if (editingText.trim() === '') return
 
-    setTodos(todos.map(todo =>
-      todo.id === id ? { ...todo, text: editingText } : todo
-    ))
-    setEditingId(null)
-    setEditingText('')
+    try {
+      const { error } = await supabase
+        .from('todos')
+        .update({ text: editingText })
+        .eq('id', id)
+
+      if (error) throw error
+
+      setTodos(todos.map(todo =>
+        todo.id === id ? { ...todo, text: editingText } : todo
+      ))
+      setEditingId(null)
+      setEditingText('')
+    } catch (error) {
+      console.error('Error updating todo:', error.message)
+      alert('Error updating todo. Please try again.')
+    }
   }
 
   // Cancel editing
@@ -90,6 +172,17 @@ function App() {
   const isOverdue = (dueDate) => {
     if (!dueDate) return false
     return new Date(dueDate) < new Date() && new Date(dueDate).toDateString() !== new Date().toDateString()
+  }
+
+  if (loading) {
+    return (
+      <div className="app">
+        <div className="container">
+          <h1>My To-Do List</h1>
+          <p style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>Loading todos...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
